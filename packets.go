@@ -92,9 +92,21 @@ func NewKeyState(key *KeyModel) KeyState {
 	return KeyState{
 		key: key,
 		redState: NewStateInfo(uint8(key.LEDID()), keyChannels[0]),
-		greenState: NewStateInfo(uint8(key.LEDID()), keyChannels[0]),
-		blueState: NewStateInfo(uint8(key.LEDID()), keyChannels[0]),
+		greenState: NewStateInfo(uint8(key.LEDID()), keyChannels[1]),
+		blueState: NewStateInfo(uint8(key.LEDID()), keyChannels[2]),
 	}
+}
+
+func (s *KeyState) RedState() StateInfo {
+	return *s.redState
+}
+
+func (s *KeyState) GreenState() StateInfo {
+	return *s.greenState
+}
+
+func (s *KeyState) BlueState() StateInfo {
+	return *s.blueState
 }
 
 func (s *KeyState) SetFromColorRGB(red uint16, green uint16, blue uint16) {
@@ -199,6 +211,18 @@ func (s *KeyState) SetApplyDelayed(delay uint16) {
 	s.blueState.EffectFlag = EffectFlagTriggerOnApply(s.blueState.EffectFlag)
 }
 
+func (s *KeyState) EnableTransition() {
+	s.redState.EffectFlag = EffectFlagEnableTransition(s.redState.EffectFlag)
+	s.greenState.EffectFlag = EffectFlagEnableTransition(s.greenState.EffectFlag)
+	s.blueState.EffectFlag = EffectFlagEnableTransition(s.blueState.EffectFlag)
+}
+
+func (s *KeyState) DisableTransition() {
+	s.redState.EffectFlag = EffectFlagDisableTransition(s.redState.EffectFlag)
+	s.greenState.EffectFlag = EffectFlagDisableTransition(s.greenState.EffectFlag)
+	s.blueState.EffectFlag = EffectFlagDisableTransition(s.blueState.EffectFlag)
+}
+
 func (s *KeyState) SetToHardwareProfile() {
 	s.redState.EffectID = 0x00
 	s.greenState.EffectID = 0x00
@@ -213,35 +237,57 @@ func (s *KeyState) BuildStatePackets(info *hid.DeviceInfo) (packets [][]byte) {
 	return packets
 }
 
+type Endian interface {
+	PutUint8(buf []byte, val uint8, location int)
+	PutUint16(buf []byte, val uint16, location int)
+}
+
+type LittleEndian struct {
+
+}
+
+func (e LittleEndian) PutUint8(buf []byte, val uint8, location int) {
+	buf[location] = byte(val)
+}
+
+func (e LittleEndian) PutUint16(buf []byte, val uint16, location int) {
+	buf[location] = byte(val)
+	buf[location+1] = byte(val >> 8)
+}
+
 func StatePacket(info *hid.DeviceInfo, state StateInfo) (packet []byte) {
-	buf := bytes.NewBuffer(packet)
-	order := binary.LittleEndian
+	packet = make([]byte, 33)
+	writer := LittleEndian{}
 	if state.Key == 0 {
 		state.Key = 151
 	}
-	binary.Write(buf, order, []uint8{0, 40, 0, state.ColorChannelID, 1, state.Key, state.EffectID})
-	binary.Write(buf, order, []uint16{
-		state.UpMaximumLevel,
-		state.UpIncrement,
-		state.UpIncrementDelay,
-		state.UpHoldLevel,
-		state.UpHoldDelay,
-		state.DownMinimumLevel,
-		state.DownDecrement,
-		state.DownDecrementDelay,
-		state.DownHoldLevel,
-		state.DownHoldDelay,
-		state.StartDelay,
-		0,
-		state.EffectFlag,
-	})
-	packet = buf.Bytes()
+	writer.PutUint8(packet, 0, 0)
+	writer.PutUint8(packet, 40, 1)
+	writer.PutUint8(packet, 0, 2)
+	writer.PutUint8(packet, state.ColorChannelID, 3)
+	writer.PutUint8(packet, 1, 4)
+	writer.PutUint8(packet, state.Key, 5)
+	writer.PutUint8(packet, state.EffectID, 6) // 0x00 or 0x02
+	writer.PutUint16(packet, state.UpMaximumLevel, 7)
+	writer.PutUint16(packet, state.UpIncrement, 9)
+	writer.PutUint16(packet, state.UpIncrementDelay, 11)
+	writer.PutUint16(packet, state.UpHoldLevel, 13)
+	writer.PutUint16(packet, state.UpHoldDelay, 15)
+	writer.PutUint16(packet, state.DownMinimumLevel, 17)
+	writer.PutUint16(packet, state.DownDecrement, 19)
+	writer.PutUint16(packet, state.DownDecrementDelay, 21)
+	writer.PutUint16(packet, state.DownHoldLevel, 23)
+	writer.PutUint16(packet, state.DownHoldDelay, 25)
+	writer.PutUint16(packet, state.StartDelay, 27)
+	writer.PutUint16(packet, 0, 29)
+	writer.PutUint16(packet, state.EffectFlag, 31)
 	return
 }
 
 func TriggerPacket(info *hid.DeviceInfo) (packet []byte) {
 	buf := bytes.NewBuffer(packet)
 	order := binary.LittleEndian
+	// order := binary.BigEndian
 	binary.Write(buf, order, []uint8{0, 45, 0, 15})
 	binary.Write(buf, order,
 		[]uint16{65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535})

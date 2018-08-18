@@ -31,12 +31,15 @@ func main() {
 	for key, value := range keymodel.KeyMap {
 		fmt.Printf("Changing key: %v: %v\n", key, value)
 		state := usb.NewKeyState(&value)
+		state.SetToHardwareProfile()
 		state.SetToColorRGB(0xFF, 0, 0)
+		fmt.Printf("\tKey State red: %v green: %v blue: %v\n", state.RedState(), state.GreenState(), state.BlueState())
 
 		fatalIf(keyboard.SetKeyState(state))
 	}
 
 	fatalIf(keyboard.Apply())
+	//fatalIf(keyboard.SetBrightness(63))
 
 	fatalIf(keyboard.Disconnect())
 }

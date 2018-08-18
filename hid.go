@@ -33,12 +33,6 @@ func NewDefaultDasKeyboard(vendorID uint16, productID uint16, deviceInterface in
 	}
 }
 
-// At this point we're really not sure exactly what this does.
-// However, we know it's very important. This is sent by the main service module.
-var initializePacket = []byte{0x00, 0x13, 0x00, 0x4d, 0x43, 0x49, 0x51, 0x46, 0x49, 0x46, 0x45, 0x44,
-	0x4c, 0x48, 0x39, 0x46, 0x34, 0x41, 0x45, 0x43, 0x58, 0x39, 0x31, 0x36,
-	0x50, 0x42, 0x44, 0x35, 0x50, 0x33, 0x41, 0x33, 0x30, 0x37, 0x38}
-
 // Connect to the keyboard
 func (d *DefaultDasKeyboard) Connect() (err error) {
 	devices := hid.Enumerate(d.vendorID, d.productID)
@@ -119,47 +113,67 @@ func (d *DefaultDasKeyboard) GetKeyboardData() (err error, info DasKeyboardFirmw
 		return
 	}
 	fmt.Printf("Got firmware packet: %v\n", firmwareVersionPacket)
-	startIdx := 2
-	info.MajorVersion = firmwareVersionPacket[startIdx+1]
-	info.MinorVersion = firmwareVersionPacket[startIdx+2]
-	info.PatchVersion = firmwareVersionPacket[startIdx+3]
-	info.RCVersion = firmwareVersionPacket[startIdx+4]
-	info.PacketCount = firmwareVersionPacket[startIdx]
+	info.MajorVersion = firmwareVersionPacket[4]
+	info.MinorVersion = firmwareVersionPacket[5]
+	info.PatchVersion = firmwareVersionPacket[6]
+	info.RCVersion = firmwareVersionPacket[7]
+	info.PacketCount = firmwareVersionPacket[3]
 	fmt.Printf("\t Got version %v\n", info)
 	return
 }
 
 const maxBufSize = 65
 
-func (d *DefaultDasKeyboard) FeatureReport(reportID uint16, report []byte) (result []byte, err error) {
-	buf := make([]byte, 0)
-	buf = append(buf, byte(reportID))
-	buf = append(buf, report[1:]...)
-	//buf = append(buf, report...)
-	for len(buf) < maxBufSize {
-		buf = append(buf, 0)
-	}
+func (d *DefaultDasKeyboard) getAndIncrementSequence() byte {
 	d.mu.Lock()
+	defer d.mu.Unlock()
 	sequence := byte(d.sequence)
-	d.mu.Unlock()
-	buf[3] = sequence
-	bufCopy := make([]byte, len(buf))
-	for i, b := range buf {
-		bufCopy[i] = b
-	}
-	bytesWritten, err := d.device.GetFeatureReport(buf)
-	if err != nil {
-		fmt.Printf("could not write feature report: (%d) %v\n\tfinal buf: (%d) %v\n", len(bufCopy), bufCopy, len(buf), buf)
-		return
-	}
-	fmt.Printf("wrote %d bytes in feature report: (%d) %v\n\tfinal buf: (%d) %v\n", bytesWritten, len(bufCopy), bufCopy, len(buf), buf)
-	d.mu.Lock()
 	if d.sequence == 0xFF {
-		d.sequence = 0x00
+		d.sequence = 0
 	} else {
 		d.sequence += 1
 	}
-	d.mu.Unlock()
+	return sequence
+}
+
+func (d *DefaultDasKeyboard) FeatureReport(reportID byte, report []byte) (result []byte, err error) {
+	buf := make([]byte, 65)
+	buf[0] = reportID
+	for i, b := range report {
+		buf[i+1] = b
+	}
+	sequence := d.getAndIncrementSequence()
+	buf[3] = sequence
+	bytesWritten, err := d.device.SendFeatureReport(buf)
+	if err != nil {
+		fmt.Printf("1. could not write feature report: (%d) %v\n\terr: %v", len(buf), buf, err)
+		return
+	}
+	fmt.Printf("1. wrote %d bytes in feature report: %v\n", bytesWritten, buf)
+
+	buf[2] = 0
+	buf[3] = sequence
+	bytesRead, err := d.device.GetFeatureReport(buf)
+	if err != nil {
+		fmt.Printf("2. could not read feature report: (%d) %v\n\terr: %v\n", len(buf), buf, err)
+		return
+	}
+	if bytesRead < 3 {
+		err = fmt.Errorf("expected at least 3 bytes, but got %d: %v", bytesRead, buf)
+		return
+	}
+
+	fmt.Printf("2. read %d bytes in feature report: %v\n", bytesRead, buf)
+
+	if buf[1] != 0x14 {
+		err = fmt.Errorf("invalid ack response received: expected 20 but got: %v", buf[1])
+		return
+	}
+
+	if buf[2] != sequence {
+		err = fmt.Errorf("wrong sequence number in response: got: %d, expected %d", buf[2], sequence)
+		return
+	}
 
 	result = buf
 

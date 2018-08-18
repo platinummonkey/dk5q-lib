@@ -25,13 +25,18 @@ func main() {
 	fatalIf(keyboard.Initialize())
 	err, firmware := keyboard.GetKeyboardData()
 	fatalIf(err)
-	fmt.Printf("Got firmware data: %v", firmware)
+	fmt.Printf("Got firmware data: %v\n\n", firmware)
 
 	// Cycle all keys for fun
 	for key, value := range keymodel.KeyMap {
 		fmt.Printf("Changing key: %v: %v\n", key, value)
+		state := usb.NewKeyState(&value)
+		state.SetToColorRGB(0xFF, 0, 0)
 
+		fatalIf(keyboard.SetKeyState(state))
 	}
+
+	fatalIf(keyboard.Apply())
 
 	fatalIf(keyboard.Disconnect())
 }

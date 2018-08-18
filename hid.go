@@ -89,6 +89,16 @@ func (d *DefaultDasKeyboard) FreezeEffects() (err error) {
 	return
 }
 
+func (d *DefaultDasKeyboard) SetKeyState(state KeyState) (err error) {
+	for _, packet := range state.BuildStatePackets(d.deviceInfo) {
+		_, err = d.FeatureReport(0x00, packet)
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
 func (d *DefaultDasKeyboard) Apply() (err error) {
 	fmt.Printf("Applying any pending color commands...\n")
 	_, err = d.FeatureReport(0x00, TriggerPacket(d.deviceInfo))
@@ -108,8 +118,17 @@ func (d *DefaultDasKeyboard) SetBrightness(brightness uint8) (err error) {
 
 func (d *DefaultDasKeyboard) GetKeyboardData() (err error, info DasKeyboardFirmwareInfo) {
 	fmt.Printf("Getting keyboard data...\n")
-	firmwareVersionPacket, err := d.FeatureReport(0x00, FirmwarePacket(d.deviceInfo))
+	_, err = d.FeatureReport(0x00, FirmwarePacket(d.deviceInfo))
 	if err != nil {
+		return
+	}
+	firmwareVersionPacket := make([]byte, 65)
+	bytesRead, err := d.device.GetFeatureReport(firmwareVersionPacket)
+	if err != nil {
+		return
+	}
+	if bytesRead < 8 {
+		err = fmt.Errorf("expected at least 8 bytes")
 		return
 	}
 	fmt.Printf("Got firmware packet: %v\n", firmwareVersionPacket)
@@ -232,16 +251,9 @@ func (d *DefaultDasKeyboard) Write(data []byte) (err error) {
 			time.Sleep(100*time.Millisecond)
 		}
 
-		//now := time.Now()
 		bytesWritten, err = d.device.Write(data)
 		fmt.Printf("\tgot error: %v\n", err)
 
-		//duration := time.Now().Sub(now).Nanoseconds()
-		//if duration < 10000 {
-		//	// missing device errors will return almost immediately
-		//	err = fmt.Errorf("feature report errored to quickly, likely the device is removed: %v", err)
-		//	return
-		//}
 		if err == nil {
 			return
 		}
